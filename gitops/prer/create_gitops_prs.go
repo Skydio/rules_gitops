@@ -19,8 +19,8 @@ import (
 	"log"
 	"os"
 	oe "os/exec"
-	"strings"
-	"sync"
+	//"strings"
+	//"sync"
 
 	"github.com/adobe/rules_gitops/gitops/analysis"
 	"github.com/adobe/rules_gitops/gitops/bazel"
@@ -166,24 +166,25 @@ func main() {
 	}
 
 	// Push images
-	qr = bazelQuery(fmt.Sprintf("kind(k8s_container_push, deps(%s))", strings.Join(updatedGitopsTargets, " + ")))
-	targetsCh := make(chan string)
-	var wg sync.WaitGroup
-	wg.Add(*pushParallelism)
-	for i := 0; i < *pushParallelism; i++ {
-		go func() {
-			defer wg.Done()
-			for target := range targetsCh {
-				bin := bazel.TargetToExecutable(target)
-				exec.Mustex("", bin)
-			}
-		}()
-	}
-	for _, t := range qr.Results {
-		targetsCh <- t.Target.Rule.GetName()
-	}
-	close(targetsCh)
-	wg.Wait()
+	// (TODO:arturo) figure out why this doesn't quite work getting bazel file path errors
+	//qr = bazelQuery(fmt.Sprintf("kind(k8s_container_push, deps(%s))", strings.Join(updatedGitopsTargets, " + ")))
+	//targetsCh := make(chan string)
+	//var wg sync.WaitGroup
+	//wg.Add(*pushParallelism)
+	//for i := 0; i < *pushParallelism; i++ {
+	//	go func() {
+	//		defer wg.Done()
+	//		for target := range targetsCh {
+	//			bin := bazel.TargetToExecutable(target)
+	//			exec.Mustex("", bin)
+	//		}
+	//	}()
+	//}
+	//for _, t := range qr.Results {
+	//	targetsCh <- t.Target.Rule.GetName()
+	//}
+	//close(targetsCh)
+	//wg.Wait()
 
 	workdir.Push(updatedGitopsBranches)
 
