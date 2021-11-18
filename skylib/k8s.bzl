@@ -100,8 +100,8 @@ def _image_pushes(name_suffix, images, image_registry, image_repository, image_r
 def k8s_deploy(
         name,  # name of the rule is important for gitops, since it will become a part of the target manifest file name in /cloud
         cluster = "dev",
-        kubectl_context_cluster=None,
-        kubectl_context_user=None,
+        kubectl_context_cluster = None,
+        kubectl_context_user = None,
         user = "{BUILD_USER}",
         namespace = None,
         configmaps_srcs = None,
@@ -129,13 +129,14 @@ def k8s_deploy(
         gitops = True,  # make sure to use gitops = False to work with individual namespace. This option will be turned False if namespace is '{BUILD_USER}'
         gitops_path = "cloud",
         gitops_directory_structure = "{namespace}/{cluster}",
-        not_gitops_image_repository_prefix = '{BUILD_USER}',  # Sets the .apply|.delete targets to utilize a repository prefix when gitops is False
+        not_gitops_image_repository_prefix = "{BUILD_USER}",  # Sets the .apply|.delete targets to utilize a repository prefix when gitops is False
         deployment_branch = None,
         release_branch_prefix = "master",
         flatten_manifest_directories = False,
         start_tag = "{{",
         end_tag = "}}",
-        visibility = None):
+        visibility = None,
+        override_gitops_image_tag = False):
     """ k8s_deploy
     """
 
@@ -157,7 +158,7 @@ def k8s_deploy(
         kubectl_context_cluster = cluster
 
     if not kubectl_context_user:
-       kubectl_context_cluster = user
+        kubectl_context_cluster = user
 
     if not gitops:
         # Mynamespace option
@@ -193,7 +194,7 @@ def k8s_deploy(
             patches = patches,
             objects = objects,
             image_name_patches = image_name_patches,
-            image_tag_patches = image_tag_patches,
+            image_tag_patches = {} if override_gitops_image_tag else image_name_patches,
             visibility = visibility,
         )
         kubectl(
@@ -232,6 +233,7 @@ def k8s_deploy(
             image_repository_prefix = image_repository_prefix,
             image_digest_tag = image_digest_tag,
         )
+
         kustomize(
             name = name,
             namespace = namespace,
@@ -441,7 +443,7 @@ def _k8s_cmd_impl(ctx):
         command_file = ctx.actions.declare_file(ctx.label.name + ".command")
         _stamp(ctx, ctx.attr.command, command_file)
         command_arg = "source %s" % _runfiles(ctx, command_file)
-        files += [command_file]
+        files.append(command_file)
 
     ctx.actions.expand_template(
         template = ctx.file._template,
@@ -503,7 +505,7 @@ def _k8s_test_namespace_impl(ctx):
         output = namespace_create,
         is_executable = True,
     )
-    files += [namespace_create]
+    files.append(namespace_create)
 
     return [DefaultInfo(
         executable = namespace_create,
@@ -544,16 +546,16 @@ def _k8s_test_setup_impl(ctx):
     for obj in ctx.attr.objects:
         if obj.files_to_run.executable:
             # add object' targets and excutables to runfiles
-            files += [obj.files_to_run.executable]
+            files.append(obj.files_to_run.executable)
             transitive.append(obj.default_runfiles.files)
 
             # add object' execution command
-            commands += [_runfiles(ctx, obj.files_to_run.executable) + " | ${SET_NAMESPACE} $NAMESPACE | ${IT_MANIFEST_FILTER} | ${KUBECTL} apply -f -"]
+            commands.append(_runfiles(ctx, obj.files_to_run.executable) + " | ${SET_NAMESPACE} $NAMESPACE | ${IT_MANIFEST_FILTER} | ${KUBECTL} apply -f -")
         else:
             files += obj.files.to_list()
             commands += [ctx.executable._template_engine.short_path + " --template=" + filename.short_path + " --variable=NAMESPACE=${NAMESPACE} | ${SET_NAMESPACE} $NAMESPACE | ${IT_MANIFEST_FILTER} | ${KUBECTL} apply -f -" for filename in obj.files.to_list()]
 
-    files += [ctx.executable._template_engine]
+    files.append(ctx.executable._template_engine)
 
     # create namespace script
     ctx.actions.expand_template(
