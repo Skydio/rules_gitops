@@ -194,7 +194,7 @@ def k8s_deploy(
             patches = patches,
             objects = objects,
             image_name_patches = image_name_patches,
-            image_tag_patches = {} if override_gitops_image_tag else image_name_patches,
+            image_tag_patches = {},
             visibility = visibility,
         )
         kubectl(
@@ -256,6 +256,31 @@ def k8s_deploy(
             common_annotations = common_annotations,
             patches = patches,
             image_name_patches = image_name_patches,
+            #image_tag_patches = image_tag_patches,
+            image_tag_patches = {} if override_gitops_image_tag else image_tag_patches,
+        )
+        kustomize(
+            name = name + "_gitops",
+            namespace = namespace,
+            configmaps_srcs = configmaps_srcs,
+            secrets_srcs = secrets_srcs,
+            # disable_name_suffix_hash is renamed to configmaps_renaming in recent Kustomize
+            disable_name_suffix_hash = (configmaps_renaming != "hash"),
+            images = image_pushes,
+            manifests = manifests,
+            visibility = visibility,
+            substitutions = substitutions,
+            deps = deps,
+            deps_aliases = deps_aliases,
+            start_tag = start_tag,
+            end_tag = end_tag,
+            name_prefix = name_prefix,
+            name_suffix = name_suffix,
+            configurations = configurations,
+            common_labels = common_labels,
+            common_annotations = common_annotations,
+            patches = patches,
+            image_name_patches = image_name_patches,
             image_tag_patches = image_tag_patches,
         )
         kubectl(
@@ -268,7 +293,7 @@ def k8s_deploy(
         )
         kustomize_gitops(
             name = name + ".gitops",
-            srcs = [name],
+            srcs = [name + "_gitops"],
             cluster = cluster,
             namespace = namespace,
             gitops_path = gitops_path,
