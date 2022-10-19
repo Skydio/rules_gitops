@@ -130,7 +130,7 @@ def k8s_deploy(
         gitops_directory_structure = "{namespace}/{cluster}",
         not_gitops_image_repository_prefix = "{BUILD_USER}",  # Sets the .apply|.delete targets to utilize a repository prefix when gitops is False
         deployment_branch = None,
-        release_branch_prefix = "master",
+        release_branch_prefix = "main",
         start_tag = "{{",
         end_tag = "}}",
         tags = None,  # bazel tags to forward to all rules in this macro
