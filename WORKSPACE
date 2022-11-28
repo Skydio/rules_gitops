@@ -79,3 +79,11 @@ register_unittest_toolchains()
 load("@com_github_bazelbuild_buildtools//buildifier:deps.bzl", "buildifier_dependencies")
 
 buildifier_dependencies()
+
+load("//skylib:k8s.bzl", "kubeconfig")
+
+kubeconfig(
+    name = "k8s_test",
+    cluster = "mycluster",
+    use_host_config = True,
+)

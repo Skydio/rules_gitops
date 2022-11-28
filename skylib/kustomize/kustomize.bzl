@@ -8,7 +8,6 @@
 # OF ANY KIND, either express or implied. See the License for the specific language
 # governing permissions and limitations under the License.
 
-load("@io_bazel_rules_docker//container:providers.bzl", "PushInfo")
 load(
     "@io_bazel_rules_docker//skylib:path.bzl",
     _get_runfile_path = "runfile",
@@ -185,6 +184,7 @@ def _kustomize_impl(ctx):
     else:
         ctx.actions.write(kustomization_yaml_file, kustomization_yaml)
 
+    transitive_runfiles = []
     resolver_part = ""
     if ctx.attr.images:
         resolver_part += " | {resolver} ".format(resolver = ctx.executable._resolver.path)
@@ -206,6 +206,8 @@ def _kustomize_impl(ctx):
                 else:
                     resolver_part += " --image {}={}@$(cat {})".format(kpi.legacy_image_name, regrepo, kpi.digestfile.path)
             tmpfiles.append(kpi.digestfile)
+            transitive_runfiles.append(img[DefaultInfo].default_runfiles)
+
     if ctx.attr.omit_image_tag and ctx.attr.image_names:
         resolver_part += " | {resolver} ".format(resolver = ctx.executable._resolver.path)
         tmpfiles.append(ctx.executable._resolver)
@@ -280,6 +282,8 @@ def _kustomize_impl(ctx):
         tools = [ctx.executable._kustomize_bin],
     )
 
+    runfiles = ctx.runfiles(files = ctx.files.deps).merge_all(transitive_runfiles)
+
     transitive_files = [m[DefaultInfo].files for m in ctx.attr.manifests if KustomizeInfo in m]
     transitive_files += [obj[DefaultInfo].files for obj in ctx.attr.objects]
 
@@ -292,6 +296,7 @@ def _kustomize_impl(ctx):
                 [ctx.outputs.yaml],
                 transitive = transitive_files,
             ),
+            runfiles = runfiles,
         ),
         KustomizeInfo(
             image_pushes = depset(
@@ -369,7 +374,7 @@ def _push_all_impl(ctx):
         template = ctx.file._tpl,
         substitutions = {
             "%{statements}": "\n".join([
-                                 "echo pushing {}/{}".format(exe[PushInfo].registry, exe[PushInfo].repository)
+                                 "echo pushing {}/{}".format(exe[K8sPushInfo].registry, exe[K8sPushInfo].repository)
                                  for exe in trans_img_pushes
                              ]) + "\n" +
                              "\n".join([
@@ -427,7 +432,7 @@ def imagePushStatements(
     statements = ""
     trans_img_pushes = depset(transitive = [obj[KustomizeInfo].image_pushes for obj in kustomize_objs]).to_list()
     statements += "\n".join([
-        "echo  pushing {}/{}".format(exe[PushInfo].registry, exe[PushInfo].repository)
+        "echo  pushing {}/{}".format(exe[K8sPushInfo].registry, exe[K8sPushInfo].repository)
         for exe in trans_img_pushes
     ]) + "\n"
     statements += "\n".join([
@@ -537,11 +542,15 @@ def _kubectl_impl(ctx):
 
     statements = ""
     transitive = None
+    transitive_runfiles = []
+
+    files += [ctx.executable._template_engine, ctx.file._info_file]
 
     if ctx.attr.push:
         trans_img_pushes = depset(transitive = [obj[KustomizeInfo].image_pushes for obj in ctx.attr.srcs]).to_list()
         statements += "\n".join([
-            "echo  pushing {}/{}".format(exe[PushInfo].registry, exe[PushInfo].repository)
+            "# {}\n".format(exe[K8sPushInfo].image_label) +
+            "echo  pushing {}/{}".format(exe[K8sPushInfo].registry, exe[K8sPushInfo].repository)
             for exe in trans_img_pushes
         ]) + "\n"
         statements += "\n".join([
@@ -550,6 +559,7 @@ def _kubectl_impl(ctx):
         ]) + "\nwaitpids\n"
         files += [obj.files_to_run.executable for obj in trans_img_pushes]
         transitive = depset(transitive = [obj.default_runfiles.files for obj in trans_img_pushes])
+        transitive_runfiles += [exe[DefaultInfo].default_runfiles for exe in trans_img_pushes]
 
     namespace = ctx.attr.namespace
     for inattr in ctx.attr.srcs:
@@ -564,8 +574,6 @@ def _kubectl_impl(ctx):
                 info_file = ctx.file._info_file.short_path,
             )
 
-    files += [ctx.executable._template_engine, ctx.file._info_file]
-
     ctx.actions.expand_template(
         template = ctx.file._template,
         substitutions = {
@@ -573,8 +581,12 @@ def _kubectl_impl(ctx):
         },
         output = ctx.outputs.executable,
     )
+
+    runfiles = ctx.runfiles(files = files, transitive_files = transitive)
+    runfiles = runfiles.merge_all(transitive_runfiles)
+
     return [
-        DefaultInfo(runfiles = ctx.runfiles(files = files, transitive_files = transitive)),
+        DefaultInfo(runfiles = runfiles),
     ]
 
 kubectl = rule(
