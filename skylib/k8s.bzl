@@ -127,6 +127,7 @@ def k8s_deploy(
         image_repository = None,  # repository (registry path) to push container to. Generated from the image bazel path if empty.
         image_repository_prefix = None,  # Mutually exclusive with 'image_repository'. Add a prefix to the repository name generated from the image bazel path
         objects = [],
+        omit_image_tag_in_gitops = False,
         gitops = True,  # make sure to use gitops = False to work with individual namespace. This option will be turned False if namespace is '{BUILD_USER}'
         gitops_path = "cloud",
         gitops_directory_structure = "{namespace}/{cluster}",
@@ -265,6 +266,32 @@ def k8s_deploy(
             image_tag_patches = image_tag_patches,
             tags = tags,
         )
+        kustomize(
+            name = name + "_gitops",
+            namespace = namespace,
+            configmaps_srcs = configmaps_srcs,
+            secrets_srcs = secrets_srcs,
+            # disable_name_suffix_hash is renamed to configmaps_renaming in recent Kustomize
+            disable_name_suffix_hash = (configmaps_renaming != "hash"),
+            images = image_pushes,
+            omit_image_tag = omit_image_tag_in_gitops,
+            manifests = manifests,
+            visibility = visibility,
+            substitutions = substitutions,
+            deps = deps,
+            deps_aliases = deps_aliases,
+            start_tag = start_tag,
+            end_tag = end_tag,
+            name_prefix = name_prefix,
+            name_suffix = name_suffix,
+            configurations = configurations,
+            common_labels = common_labels,
+            common_annotations = common_annotations,
+            patches = patches,
+            image_name_patches = image_name_patches,
+            image_tag_patches = image_tag_patches,
+            tags = tags,
+        )
         kubectl(
             name = name + ".apply",
             srcs = [name],
@@ -276,7 +303,7 @@ def k8s_deploy(
         )
         kustomize_gitops(
             name = name + ".gitops",
-            srcs = [name],
+            srcs = [name + "_gitops"],
             cluster = cluster,
             namespace = namespace,
             gitops_path = gitops_path,
