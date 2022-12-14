@@ -218,6 +218,12 @@ def _kustomize_impl(ctx):
                 else:
                     resolver_part += " --image {}={}@$(cat {})".format(kpi.legacy_image_name, regrepo, kpi.digestfile.path)
             tmpfiles.append(kpi.digestfile)
+    if ctx.attr.omit_image_tag and ctx.attr.image_names:
+        resolver_part += " | {resolver} ".format(resolver = ctx.executable._resolver.path)
+        tmpfiles.append(ctx.executable._resolver)
+        for labels, repo in ctx.attr.image_names.items():
+            for label in labels.split(","):
+                resolver_part += " --image {}={}".format(label, repo)
 
     template_part = ""
     if ctx.attr.substitutions or ctx.attr.deps:
@@ -307,6 +313,7 @@ kustomize = rule(
         "disable_name_suffix_hash": attr.bool(default = True),
         "end_tag": attr.string(default = "}}"),
         "images": attr.label_list(doc = "a list of images used in manifests", providers = (K8sPushInfo,)),
+        "image_names": attr.string_dict(doc = "a dict of images where keys split by comma and value is the image repo", default = {}),
         "omit_image_tag": attr.bool(default = False),
         "manifests": attr.label_list(allow_files = True),
         "name_prefix": attr.string(),

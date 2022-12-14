@@ -241,6 +241,19 @@ def k8s_deploy(
             image_digest_tag = image_digest_tag,
             tags = tags,
         )
+        # The purpose of this new param (image_names) is to add the ability to avoid having to
+        # build and push the images for cases where we do that outside of rules_gitops.
+        #
+        # images is a struct where the key is the name of a bazel target and the value is the label
+        # of that target, we have to support a case where just a simple string in the manifest
+        # image field is set and also when we want to use a bazel target label in the match.
+        image_names = {}
+        if images:
+            for img_name, target_name in images.items():
+                trg = target_name.replace("//", "").split(":")
+                repo = trg[0] + "/" + trg[1]
+                labels = img_name + "," + target_name
+                image_names[labels] = image_registry + "/" + repo
         kustomize(
             name = name,
             namespace = namespace,
@@ -273,7 +286,7 @@ def k8s_deploy(
             secrets_srcs = secrets_srcs,
             # disable_name_suffix_hash is renamed to configmaps_renaming in recent Kustomize
             disable_name_suffix_hash = (configmaps_renaming != "hash"),
-            images = image_pushes,
+            image_names = image_names,
             omit_image_tag = omit_image_tag_in_gitops,
             manifests = manifests,
             visibility = visibility,
