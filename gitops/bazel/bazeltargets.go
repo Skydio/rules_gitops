@@ -18,7 +18,8 @@ func TargetToExecutable(target string) string {
 	if !strings.HasPrefix(target, "//") {
 		return target
 	}
-	target = "bazel-bin/" + target[2:]
+	// NOTE(arturo): Specific to aircam bazel, maybe figure out a better way to find right path
+	target = "build/bazel-bin/" + target[2:]
 	target = strings.Replace(target, ":", "/", 1)
 	return target
 }
