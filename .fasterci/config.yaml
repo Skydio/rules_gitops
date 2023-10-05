@@ -3,10 +3,15 @@
 workflows:
 
   - &build_workflow
-    name: Faster CI / build (4.0.0)
-    image: us.gcr.io/fasterci/bazelbuilder:cd990e6
+    name: Faster CI / build (6.0.0)
+    env:
+      USE_BAZEL_VERSION: "6.0.0"
+    image: us.gcr.io/fasterci/bazelbuilder:5e59f651dbb5
     on:
       push:
+        branches:
+          - main
+      pull_request:
         branches:
           - "**"
     steps:
@@ -27,16 +32,6 @@ workflows:
         run: bazel run //:buildifier-check
 
   - <<: *build_workflow
-    name: Faster CI / build (3.7.1)
+    name: Faster CI / build (5.3.1)
     env:
-      USE_BAZEL_VERSION: "3.7.1"
-
-  - <<: *build_workflow
-    name: Faster CI / build (4.2.1)
-    env:
-      USE_BAZEL_VERSION: "4.2.1"
-      
-  - <<: *build_workflow
-    name: Faster CI / build (5.0.0)
-    env:
-      USE_BAZEL_VERSION: "5.0.0"
+      USE_BAZEL_VERSION: "5.3.1"

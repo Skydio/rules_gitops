@@ -8,7 +8,6 @@
 # OF ANY KIND, either express or implied. See the License for the specific language
 # governing permissions and limitations under the License.
 
-load("@io_bazel_rules_docker//container:providers.bzl", "PushInfo")
 load(
     "@io_bazel_rules_docker//skylib:path.bzl",
     _get_runfile_path = "runfile",
@@ -28,7 +27,6 @@ def _download_binary_impl(ctx):
         platform = "darwin_amd64"
     else:
         fail("Platform " + ctx.os.name + " is not supported")
-    path = ctx.path("bin")
 
     ctx.file("BUILD", """
 sh_binary(
@@ -66,23 +64,6 @@ def _stamp_file(ctx, infile, output):
         tools = [ctx.executable._stamper],
     )
 
-def _stamp(ctx, string, output):
-    stamps = [ctx.file._info_file]
-    stamp_args = [
-        "--stamp-info-file=%s" % sf.path
-        for sf in stamps
-    ]
-    ctx.actions.run(
-        executable = ctx.executable._stamper,
-        arguments = [
-            "--format=%s" % string,
-            "--output=%s" % output.path,
-        ] + stamp_args,
-        inputs = [ctx.executable._stamper] + stamps,
-        outputs = [output],
-        mnemonic = "Stamp",
-    )
-
 def _is_ignored_src(src):
     basename = src.rsplit("/", 1)[-1]
     return basename.startswith(".")
@@ -92,6 +73,8 @@ _script_template = """\
 set -euo pipefail
 {kustomize} build --load-restrictor LoadRestrictionsNone --reorder legacy {kustomize_dir} {template_part} {resolver_part} >{out}
 """
+
+# buildifier: disable=provider-params
 KustomizeInfo = provider(fields = [
     "image_pushes",
 ])
@@ -201,6 +184,7 @@ def _kustomize_impl(ctx):
     else:
         ctx.actions.write(kustomization_yaml_file, kustomization_yaml)
 
+    transitive_runfiles = []
     resolver_part = ""
     if ctx.attr.images:
         resolver_part += " | {resolver} ".format(resolver = ctx.executable._resolver.path)
@@ -212,12 +196,18 @@ def _kustomize_impl(ctx):
                 regrepo = stamp(ctx, regrepo, tmpfiles, ctx.attr.name + regrepo.replace("/", "_"))
 
             resolver_part += " --image {}={}@$(cat {})".format(kpi.image_label, regrepo, kpi.digestfile.path)
+            if str(kpi.image_label).startswith("@//"):
+                # Bazel 6 add a @ prefix to the image label https://github.com/bazelbuild/bazel/issues/17069
+                label = str(kpi.image_label)[1:]
+                resolver_part += " --image {}={}@$(cat {})".format(label, regrepo, kpi.digestfile.path)
             if kpi.legacy_image_name:
                 if ctx.attr.omit_image_tag:
                     resolver_part += " --image {}={}".format(kpi.legacy_image_name, regrepo)
                 else:
                     resolver_part += " --image {}={}@$(cat {})".format(kpi.legacy_image_name, regrepo, kpi.digestfile.path)
             tmpfiles.append(kpi.digestfile)
+            transitive_runfiles.append(img[DefaultInfo].default_runfiles)
+
     if ctx.attr.omit_image_tag and ctx.attr.image_names:
         resolver_part += " | {resolver} ".format(resolver = ctx.executable._resolver.path)
         tmpfiles.append(ctx.executable._resolver)
@@ -249,16 +239,25 @@ def _kustomize_impl(ctx):
 
         # Image name substitutions
         if ctx.attr.images:
-            for i, img in enumerate(ctx.attr.images):
+            for _, img in enumerate(ctx.attr.images):
                 kpi = img[K8sPushInfo]
                 regrepo = kpi.registry + "/" + kpi.repository
                 if "{" in regrepo:
                     regrepo = stamp(ctx, regrepo, tmpfiles, ctx.attr.name + regrepo.replace("/", "_"))
                 template_part += " --variable={}={}@$(cat {})".format(kpi.image_label, regrepo, kpi.digestfile.path)
+                if str(kpi.image_label).startswith("@//"):
+                    # Bazel 6 add a @ prefix to the image label https://github.com/bazelbuild/bazel/issues/17069
+                    label = str(kpi.image_label)[1:]
+                    template_part += " --variable={}={}@$(cat {})".format(label, regrepo, kpi.digestfile.path)
 
                 # Image digest
                 template_part += " --variable={}=$(cat {} | cut -d ':' -f 2)".format(str(kpi.image_label) + ".digest", kpi.digestfile.path)
                 template_part += " --variable={}=$(cat {} | cut -c 8-17)".format(str(kpi.image_label) + ".short-digest", kpi.digestfile.path)
+                if str(kpi.image_label).startswith("@//"):
+                    # Bazel 6 add a @ prefix to the image label
+                    label = str(kpi.image_label)[1:]
+                    template_part += " --variable={}=$(cat {} | cut -d ':' -f 2)".format(str(label) + ".digest", kpi.digestfile.path)
+                    template_part += " --variable={}=$(cat {} | cut -c 8-17)".format(str(label) + ".short-digest", kpi.digestfile.path)
 
                 if kpi.legacy_image_name:
                     template_part += " --variable={}={}@$(cat {})".format(kpi.legacy_image_name, regrepo, kpi.digestfile.path)
@@ -283,6 +282,8 @@ def _kustomize_impl(ctx):
         tools = [ctx.executable._kustomize_bin],
     )
 
+    runfiles = ctx.runfiles(files = ctx.files.deps).merge_all(transitive_runfiles)
+
     transitive_files = [m[DefaultInfo].files for m in ctx.attr.manifests if KustomizeInfo in m]
     transitive_files += [obj[DefaultInfo].files for obj in ctx.attr.objects]
 
@@ -295,6 +296,7 @@ def _kustomize_impl(ctx):
                 [ctx.outputs.yaml],
                 transitive = transitive_files,
             ),
+            runfiles = runfiles,
         ),
         KustomizeInfo(
             image_pushes = depset(
@@ -339,34 +341,31 @@ kustomize = rule(
         ),
         "_kustomize_bin": attr.label(
             default = Label("@kustomize_bin//:kustomize"),
-            cfg = "host",
+            cfg = "exec",
             executable = True,
             allow_files = True,
         ),
         "_resolver": attr.label(
             default = Label("//resolver:resolver"),
-            cfg = "host",
+            cfg = "exec",
             executable = True,
         ),
         "_stamper": attr.label(
             default = Label("//stamper:stamper"),
-            cfg = "host",
+            cfg = "exec",
             executable = True,
             allow_files = True,
         ),
         "_template_engine": attr.label(
             default = Label("//templating:fast_template_engine"),
             executable = True,
-            cfg = "host",
+            cfg = "exec",
         ),
     },
     outputs = {
         "yaml": "%{name}.yaml",
     },
 )
-
-def _runfiles(ctx, f):
-    return "PYTHON_RUNFILES=${RUNFILES} ${RUNFILES}/%s" % _get_runfile_path(ctx, f)
 
 def _push_all_impl(ctx):
     trans_img_pushes = depset(transitive = [obj[KustomizeInfo].image_pushes for obj in ctx.attr.srcs]).to_list()
@@ -375,7 +374,7 @@ def _push_all_impl(ctx):
         template = ctx.file._tpl,
         substitutions = {
             "%{statements}": "\n".join([
-                                 "echo pushing {}/{}".format(exe[PushInfo].registry, exe[PushInfo].repository)
+                                 "echo pushing {}/{}".format(exe[K8sPushInfo].registry, exe[K8sPushInfo].repository)
                                  for exe in trans_img_pushes
                              ]) + "\n" +
                              "\n".join([
@@ -420,9 +419,6 @@ def _remove_gitops_suffix(s):
     s = s.replace("_gitops.yaml", ".yaml")
     return s
 
-def _python_runfiles(ctx, f):
-    return "PYTHON_RUNFILES=${RUNFILES} %s" % _runfiles(ctx, f)
-
 def _format_gitops_directory_structure(string, cluster, namespace):
     return string.format(cluster = cluster, namespace = namespace)
 
@@ -433,7 +429,7 @@ def imagePushStatements(
     statements = ""
     trans_img_pushes = depset(transitive = [obj[KustomizeInfo].image_pushes for obj in kustomize_objs]).to_list()
     statements += "\n".join([
-        "echo  pushing {}/{}".format(exe[PushInfo].registry, exe[PushInfo].repository)
+        "echo  pushing {}/{}".format(exe[K8sPushInfo].registry, exe[K8sPushInfo].repository)
         for exe in trans_img_pushes
     ]) + "\n"
     statements += "\n".join([
@@ -514,7 +510,7 @@ gitops = rule(
         "_template_engine": attr.label(
             default = Label("//templating:fast_template_engine"),
             executable = True,
-            cfg = "host",
+            cfg = "exec",
         ),
         "_template": attr.label(
             default = Label("//skylib:k8s_gitops.sh.tpl"),
@@ -543,11 +539,15 @@ def _kubectl_impl(ctx):
 
     statements = ""
     transitive = None
+    transitive_runfiles = []
+
+    files += [ctx.executable._template_engine, ctx.file._info_file]
 
     if ctx.attr.push:
         trans_img_pushes = depset(transitive = [obj[KustomizeInfo].image_pushes for obj in ctx.attr.srcs]).to_list()
         statements += "\n".join([
-            "echo  pushing {}/{}".format(exe[PushInfo].registry, exe[PushInfo].repository)
+            "# {}\n".format(exe[K8sPushInfo].image_label) +
+            "echo  pushing {}/{}".format(exe[K8sPushInfo].registry, exe[K8sPushInfo].repository)
             for exe in trans_img_pushes
         ]) + "\n"
         statements += "\n".join([
@@ -556,6 +556,7 @@ def _kubectl_impl(ctx):
         ]) + "\nwaitpids\n"
         files += [obj.files_to_run.executable for obj in trans_img_pushes]
         transitive = depset(transitive = [obj.default_runfiles.files for obj in trans_img_pushes])
+        transitive_runfiles += [exe[DefaultInfo].default_runfiles for exe in trans_img_pushes]
 
     namespace = ctx.attr.namespace
     for inattr in ctx.attr.srcs:
@@ -570,8 +571,6 @@ def _kubectl_impl(ctx):
                 info_file = ctx.file._info_file.short_path,
             )
 
-    files += [ctx.executable._template_engine, ctx.file._info_file]
-
     ctx.actions.expand_template(
         template = ctx.file._template,
         substitutions = {
@@ -579,8 +578,12 @@ def _kubectl_impl(ctx):
         },
         output = ctx.outputs.executable,
     )
+
+    runfiles = ctx.runfiles(files = files, transitive_files = transitive)
+    runfiles = runfiles.merge_all(transitive_runfiles)
+
     return [
-        DefaultInfo(runfiles = ctx.runfiles(files = files, transitive_files = transitive)),
+        DefaultInfo(runfiles = runfiles),
     ]
 
 kubectl = rule(
@@ -601,7 +604,7 @@ kubectl = rule(
         ),
         "_stamper": attr.label(
             default = Label("//stamper:stamper"),
-            cfg = "host",
+            cfg = "exec",
             executable = True,
             allow_files = True,
         ),
@@ -612,7 +615,7 @@ kubectl = rule(
         "_template_engine": attr.label(
             default = Label("//templating:fast_template_engine"),
             executable = True,
-            cfg = "host",
+            cfg = "exec",
         ),
     },
     executable = True,
