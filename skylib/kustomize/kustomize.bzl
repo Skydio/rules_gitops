@@ -419,9 +419,6 @@ def _remove_gitops_suffix(s):
     s = s.replace("_gitops.yaml", ".yaml")
     return s
 
-def _python_runfiles(ctx, f):
-    return "PYTHON_RUNFILES=${RUNFILES} %s" % _runfiles(ctx, f)
-
 def _format_gitops_directory_structure(string, cluster, namespace):
     return string.format(cluster = cluster, namespace = namespace)
 
